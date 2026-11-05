@@ -13,6 +13,8 @@ public class P9GameGoal : MonoBehaviour
     [SerializeField] private Transform player;
     [SerializeField] private Health playerHealth;
     [SerializeField] private ExitGate exit;
+    [Tooltip("Jika diisi, Exit terbuka setelah item jenis ini diambil (misalnya Key), bukan setelah semua item terkumpul.")]
+    [SerializeField] private string requiredItemType = "";
     [Tooltip("Dimatikan saat menang/kalah (kontrol Player).")]
     [SerializeField] private MonoBehaviour[] disableOnEnd = new MonoBehaviour[0];
 
@@ -21,6 +23,7 @@ public class P9GameGoal : MonoBehaviour
     public State Current { get; private set; } = State.Playing;
     public bool IsPlaying => Current == State.Playing;
     public bool PlayerDead => playerHealth != null && playerHealth.IsDead;
+    public bool HasRequiredItem { get; private set; }
     public int ItemsTotal { get; private set; }
     public int ItemsCollected { get; private set; }
     public int Score { get; private set; }
@@ -40,10 +43,11 @@ public class P9GameGoal : MonoBehaviour
         LegendaryCollected = 0;
         RoundTime = 0f;
         collectedByType.Clear();
+        HasRequiredItem = false;
         Current = State.Playing;
         SetControls(true);
         if (exit != null)
-            exit.SetOpen(totalItems == 0);
+            exit.SetOpen(totalItems == 0 && string.IsNullOrEmpty(requiredItemType));
         Changed?.Invoke();
     }
 
@@ -61,12 +65,19 @@ public class P9GameGoal : MonoBehaviour
         if (item.Heal > 0f && playerHealth != null)
             playerHealth.Heal(item.Heal);
 
-        Debug.Log($"[Praktikum 9] Ambil {item.TypeName} (+{item.Score}) - item {ItemsCollected}/{ItemsTotal}, skor {Score}", item);
+        Debug.Log($"[Goal] Ambil {item.TypeName} (+{item.Score}) - item {ItemsCollected}/{ItemsTotal}, skor {Score}", item);
 
-        if (ItemsCollected >= ItemsTotal && exit != null && !exit.IsOpen)
+        bool needsType = !string.IsNullOrEmpty(requiredItemType);
+        if (needsType && item.TypeName == requiredItemType)
+            HasRequiredItem = true;
+
+        bool unlocked = needsType ? HasRequiredItem : ItemsCollected >= ItemsTotal;
+        if (unlocked && exit != null && !exit.IsOpen)
         {
             exit.SetOpen(true);
-            Debug.Log("[Praktikum 9] Semua item terkumpul, EXIT terbuka!");
+            Debug.Log(needsType
+                ? $"[Goal] {requiredItemType} diambil, EXIT terbuka!"
+                : "[Goal] Semua item terkumpul, EXIT terbuka!");
         }
         Changed?.Invoke();
     }
@@ -92,8 +103,8 @@ public class P9GameGoal : MonoBehaviour
         Current = result;
         SetControls(false);
         Debug.Log(result == State.Won
-            ? $"[Praktikum 9] MENANG! Skor {Score}, waktu {RoundTime:0.0} s"
-            : "[Praktikum 9] KALAH - tekan R untuk mengulang seed yang sama");
+            ? $"[Goal] MENANG! Skor {Score}, waktu {RoundTime:0.0} s"
+            : "[Goal] KALAH - tekan R untuk mengulang seed yang sama");
         Changed?.Invoke();
     }
 

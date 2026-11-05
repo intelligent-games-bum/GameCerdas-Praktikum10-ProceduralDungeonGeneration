@@ -58,6 +58,10 @@ public class PlayerController : MonoBehaviour
 
     [Header("Jump and Flight - Input")]
     [SerializeField]
+    [Tooltip("Turn off to keep the Player on the ground, for levels bounded by walls.")]
+    private bool allowFlight = true;
+
+    [SerializeField]
     [Tooltip("Tap once to jump, twice to take off. While flying, one tap gains " +
              "height and two quick taps cancel the flight.")]
     private Key flyKey = Key.Space;
@@ -336,7 +340,7 @@ public class PlayerController : MonoBehaviour
     {
         Keyboard keyboard = Keyboard.current;
 
-        bool tapped = keyboard != null && keyboard[flyKey].wasPressedThisFrame;
+        bool tapped = allowFlight && keyboard != null && keyboard[flyKey].wasPressedThisFrame;
         bool descendHeld = keyboard != null && keyboard[slowDescendKey].isPressed;
         bool doubleTapped = false;
 

@@ -96,6 +96,13 @@ public class EnemyFSM : MonoBehaviour
         }
     }
 
+    /// <summary>Dipakai spawner (Praktikum 10): prefab tidak bisa menyimpan referensi ke objek scene.</summary>
+    public void SetRoute(Transform[] route, SafePoint[] safe)
+    {
+        waypoints = route;
+        safePoints = safe;
+    }
+
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
