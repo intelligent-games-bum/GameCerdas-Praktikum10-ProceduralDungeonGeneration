@@ -3,9 +3,9 @@
 # Intelligent Games Labs
 
 The lab work for the Intelligent Games course, one Unity project that grows with each lab.
-The newest is a procedural spawner: it fills the arena with enemies and items from a seed,
-so every layout is random but can be replayed exactly. The enemies it spawns run the
-behavior tree from lab 6, and you win by collecting every item and reaching the exit.
+The newest is a procedural dungeon: BSP builds its rooms and corridors from a seed, so every
+level is random but can be replayed exactly. A flood fill checks that it can be finished, the
+enemies run the state machine from lab 5, and you win by finding the key and reaching the exit.
 
 ![Unity](https://img.shields.io/badge/Unity-6.3%20LTS-000000?logo=unity)
 ![URP](https://img.shields.io/badge/Render-URP-2196F3)
@@ -36,64 +36,146 @@ behavior tree from lab 6, and you win by collecting every item and reaching the 
 
 Clone the repo and open the folder with Unity 6.3 LTS. Unity rebuilds the `Library` folder on first launch, which takes a few minutes. Open any scene from the table above and press Play.
 
-The scenes for labs 4 to 9 are generated. The **Praktikum 4**, **Praktikum 5**, **Praktikum 6** and **Praktikum 9** menus in the editor rebuild them from scratch and bake their NavMesh, so a scene broken by an experiment is one click from new. Rebuilding overwrites the scene file, including anything you changed in it by hand.
+The scenes for labs 4 to 10 are generated. The **Praktikum 4**, **Praktikum 5**, **Praktikum 6**, **Praktikum 9** and **Praktikum 10** menus in the editor rebuild them from scratch, so a scene broken by an experiment is one click from new. Labs 4 to 9 bake their NavMesh in the menu, and lab 10 bakes it at runtime for each dungeon. Rebuilding overwrites the scene file, including anything you changed in it by hand.
 
 ---
 
 ## Lab 10: Procedural dungeon with BSP
 
-Open `Assets/Scenes/Praktikum10/P10_BSP_Dungeon.unity` and press Play. To rebuild the scene and its prefabs, use the menu **Praktikum 10 → Build Scene - BSP Dungeon**. The dungeon itself is not stored in the scene: it is generated from a seed at Play.
+The level itself is now generated. Every time the scene starts, Binary Space Partitioning builds a dungeon of rooms and corridors from a seed. The same seed and settings always give the same dungeon, and a different seed gives a different one. A flood fill then checks that everything required can be reached, and repairs the layout if it cannot. Rebuild the scene and its prefabs from **Praktikum 10 → Build Scene - BSP Dungeon**. The dungeon is not stored in the scene.
 
-Take the key to unlock the exit, then reach the exit to finish.
+Your goal: find the key, which unlocks the exit, then walk into the exit. The exit stays red until you have the key. Enemies guard the rooms and run the lab 5 finite state machine.
+
+### Controls
 
 | Input | Action |
 |---|---|
-| WASD | Move |
-| Left click | Melee attack |
-| R | Regenerate with the same seed |
+| WASD | Walk |
+| Left click | Strike whatever stands just in front of you |
+| R | Regenerate with the same seed (also restarts after you lose) |
 | N | Regenerate with a random seed |
 | T | Validation test: cut a corridor on the required path, then repair it |
-| V | Show or hide the required path, safe zone, and BSP partitions |
+| V | Show or hide the required path, the safe zone ring, and the BSP partitions on the minimap |
 | M | Switch between the follow camera and the full map |
+
+The camera is fixed top-down and the cursor stays free, so the HUD buttons work at any time. The buttons are **Regenerate (R)**, **Seed Acak (N)**, **Seed -1**, **Seed +1**, **Uji Validasi (T)**, **Jalur (V)** and **Peta Penuh (M)**. Jumping and flight are off in this scene, so you cannot cross the walls.
 
 ### How a dungeon is generated
 
-[`BspDungeonGenerator.cs`](Assets/Scripts/Praktikum10/BspDungeonGenerator.cs) produces data only. [`DungeonSpawner.cs`](Assets/Scripts/Praktikum10/DungeonSpawner.cs) turns that data into modular prefabs, bakes the NavMesh, and spawns the objects.
+[`BspDungeonGenerator.cs`](Assets/Scripts/Praktikum10/BspDungeonGenerator.cs) does all the work on a grid and creates no objects. It returns a layout, which [`DungeonSpawner.cs`](Assets/Scripts/Praktikum10/DungeonSpawner.cs) then builds from modular prefabs. One cell is 2 × 2 m.
 
-1. **BSP.** The map is split recursively into partitions, always across the longer side when one side is clearly longer.
-2. **Rooms.** Each leaf partition gets one room of random size.
-3. **Corridors.** The closest pair of rooms from the two children of every BSP node is joined with an L-shaped corridor. Optional extra corridors add loops.
-4. **Start, key, goal.** Two BFS sweeps find two rooms far apart for the start and the goal. The key goes in a room that forces a detour.
-5. **Objects.** Props, enemies, and items go on free floor cells, outside the required path. Enemies and props also stay out of the safe zone around the start. A prop that would cut off any floor is rejected.
-6. **Validation.** [`DungeonValidator.cs`](Assets/Scripts/Praktikum10/DungeonValidator.cs) runs a BFS flood fill over the floor, the rooms, the key, the goal, and every object.
-7. **Repair or retry.** A failed layout gets new corridors joining the cut-off areas. If it still fails, generation retries with a derived seed, up to `maxGenerationAttempts`. If every attempt fails, the previous level stays in place.
+1. **Partition.** Split the map in two, then split each part again, down to `maxSplitDepth`. A part that is clearly longer one way is cut across its long side, and no part gets smaller than `minLeafSize`.
+2. **Rooms.** Each leaf partition gets one room of random size and position, inset by `roomPadding`. A leaf too small for `roomMinSize` stays empty.
+3. **Corridors.** At every BSP node, take the closest pair of rooms from its two children and join them with an L-shaped corridor. This connects the whole tree. `extraConnections` then adds corridors outside the tree, which create loops.
+4. **Start, key and goal.** A BFS from a random room finds the farthest room, which becomes the start. A second BFS from there finds the goal. The key goes in one of the two rooms that make the longest detour between them.
+5. **Objects**, in order: props, enemies, items, safe points. A random cell is rejected if it breaks a rule, and redrawn up to `maxPlacementAttempts` times:
+   - enemies and props stay out of the safe zone, and enemies out of the start room,
+   - props, enemies and items stay off the required path (start to key, then key to goal),
+   - everything keeps its distance from what is already placed,
+   - a prop is refused if a flood fill shows it would cut off any floor.
+6. **Validate.** [`DungeonValidator.cs`](Assets/Scripts/Praktikum10/DungeonValidator.cs) runs a BFS from the start and checks the key, the goal, every room, every floor cell and every object.
+7. **Repair or retry.** A failed layout gets new corridors joining each cut-off area to the main one, then is validated again. If it still fails, the generator starts over with a derived seed, up to `maxGenerationAttempts`. A map too small to fit 3 rooms fails every attempt, and the previous level stays in place.
 
-Each stage draws from its own `System.Random` derived from the seed, so changing the enemy count does not change the layout. The HUD shows a layout hash, so two runs can be compared at a glance.
+Each stage draws from its own `System.Random`, all derived from the seed: layout, start and goal, props, enemies, items, and safe points. Changing the enemy count therefore does not reshape the dungeon. `UnityEngine.Random` is used only to pick a new seed for N, never for generation.
+
+The spawner then works in a fixed order: build the floor and walls, bake the NavMesh at runtime, move the player and exit, and only then spawn the enemies, because their `NavMeshAgent` needs a NavMesh when it starts. Enemies are instantiated under an inactive parent first, so `EnemyPerception.SetTarget` and `EnemyFSM.SetRoute` run before they wake up.
+
+### What gets spawned
+
+| Kind | Type | Notes |
+|---|---|---|
+| Enemy | Skeleton (FSM) | 100 HP, patrols its own room and the rooms connected to it, never routed through the start room |
+| Item | Key | Exactly one per dungeon, +25 score, opens the exit |
+| Item | Coin | 70% of items, +10 score |
+| Item | Potion | 30% of items, +5 score, heals 30 HP |
+| Prop | Crate, two barrels | Blocks the way and blocks enemy sight |
+| Safe point | Green pad | Up to two, in rooms other than the start and goal. Enemies flee here on low health |
 
 ### Parameters
 
-All parameters are on **Dungeon Systems → Dungeon Spawner**. The main ones can also be changed in the HUD while playing.
+All of these sit on **Dungeon Systems → Dungeon Spawner** in the Inspector. Those marked HUD can also be changed while playing, which regenerates with the same seed.
 
-| Parameter | Effect on the level |
+| Parameter | Default | HUD | Effect on the level |
+|---|---|---|---|
+| `mapWidth`, `mapHeight` | 36 × 36 | yes | More space and longer paths. The HUD changes both together |
+| `maxSplitDepth` | 4 | yes | Deeper splits allow more rooms |
+| `minLeafSize` | 9 | yes | Smaller partitions allow more, smaller rooms |
+| `roomMinSize`, `roomMaxSize` | 4, 9 | yes | Tight rooms or large halls |
+| `roomPadding` | 1 | yes | Smaller rooms with more wall between them |
+| `corridorWidth` | 2 | yes | Narrow chokepoints or wide passages |
+| `extraConnections` | 1 | yes | More loops and alternative routes |
+| `enemyCount`, `itemCount`, `propCount` | 6, 8, 10 | yes | Object density. The layout does not change |
+| `safeRadius` | 5 | yes | Cells around the start kept free of enemies and props |
+| `minSpacing` | 3 | no | Distance between objects, in cells |
+| `potionChance` | 0.3 | no | Share of items that are potions |
+| `maxPlacementAttempts` | 40 | no | Draws per object before it is skipped |
+| `maxGenerationAttempts` | 5 | no | Whole-dungeon retries before giving up |
+
+### Debug view
+
+The HUD shows the seed, a layout hash, the attempt count and repair result, the validation checks, objects spawned out of those requested, rejected positions split by reason (safe zone, path, spacing, blocking), and the log of every attempt. On the full map the panel shrinks to the seed, hash, validation result and object counts, so it does not cover the dungeon. Every generation is also logged to the Console.
+
+The minimap shows the layout from the same data:
+
+- grey: rooms, darker grey: corridors, brown: props,
+- light blue line: start to key, yellow line: key to goal,
+- green: start, cyan: key, magenta: goal, red: enemy spawns, yellow: coins, pink: potions,
+- white: the player, brown outlines: BSP partitions.
+
+In the game view, V also draws the two path lines on the floor and a green ring for the safe zone. Each enemy shows its state as a coloured marker above its head: green for Patrol, yellow for Chase, red for Attack, blue for Flee.
+
+Gizmos in the Scene view, in Play mode:
+
+- orange boxes: BSP partitions,
+- green boxes: rooms,
+- red spheres: enemy spawns,
+- blue cubes: items.
+
+### Experiments
+
+**Praktikum 10 → Run Generator Tests** generates 200 seeds (1 to 200) for each of seven configurations and checks every one, without pressing Play. Each seed is generated twice to compare the hashes, and once more with a corridor cut. A separate check outside the generator re-verifies the placement rules. Results go to the Console.
+
+| Configuration | Changed from default | Valid | Unique layouts | Not repeatable | Rule violations | Avg rooms | Avg attempts | Enemies spawned | Cuts repaired |
+|---|---|---|---|---|---|---|---|---|---|
+| Default | none | 200/200 | 200 | 0 | 0 | 9.3 | 1.00 | 1156/1200 | 199/199 |
+| Small map | 24 × 24, 3 enemies, 3 items, 4 props | 200/200 | 200 | 0 | 0 | 4.0 | 1.00 | 394/600 | 86/86 |
+| Large map | 64 × 64, depth 6 | 200/200 | 200 | 0 | 0 | 27.1 | 1.00 | 1200/1200 | 200/200 |
+| Narrow corridors | width 1, no extra corridors | 200/200 | 200 | 0 | 0 | 9.3 | 1.00 | 1158/1200 | 200/200 |
+| Wide corridors | width 4, 3 extra corridors | 200/200 | 200 | 0 | 0 | 9.3 | 1.00 | 1134/1200 | 182/182 |
+| Large rooms | rooms 7 to 14, leaf 14 | 200/200 | 200 | 0 | 0 | 4.0 | 1.00 | 1157/1200 | 72/72 |
+| Crowded | 20 enemies, 20 items, 30 props, spacing 2 | 200/200 | 200 | 0 | 0 | 9.3 | 1.00 | 2568/4000 | 199/199 |
+
+"Cuts repaired" counts only seeds where the cut really disconnected something. The count is lower when a seed could not be cut, for example because a loop keeps the goal reachable. Those seeds stay valid without a repair.
+
+The number of rooms follows the map size and partition settings, not the corridors: narrow and wide corridors both average 9.3 rooms. Enemies fall short of the request when rooms are few or crowded, as the rules leave too few free cells. A dungeon stays valid in that case, and the HUD reports the shortfall.
+
+A repair in practice, seed 101 with **Uji Validasi (T)**: the cut leaves the goal unreachable, with 54 floor cells and 1 room cut off, and 1 object on them. Repair carves 6 new corridor cells, and the same attempt then passes.
+
+### Scripts
+
+| File | Role |
 |---|---|
-| Map size | More space, longer paths |
-| BSP depth, min leaf | More splits and smaller partitions give more rooms |
-| Room min, room max | Small and tight rooms, or large halls |
-| Room padding | Wider gaps between rooms |
-| Corridor width | Narrow chokepoints, or wide passages |
-| Extra corridors | More loops and alternative routes |
-| Enemy, item, prop | Object density |
-| Safe zone | Distance from the start kept free of enemies and props |
+| [`DungeonConfig.cs`](Assets/Scripts/Praktikum10/DungeonConfig.cs) | Seed and every generator parameter, kept consistent by `Clamp` |
+| [`DungeonLayout.cs`](Assets/Scripts/Praktikum10/DungeonLayout.cs) | The dungeon as plain data: grid, rooms, object plans, validation result, layout hash |
+| [`BspDungeonGenerator.cs`](Assets/Scripts/Praktikum10/BspDungeonGenerator.cs) | BSP, rooms, corridors, start, key and goal, object placement, repair and retry |
+| [`DungeonValidator.cs`](Assets/Scripts/Praktikum10/DungeonValidator.cs) | BFS distances, shortest paths, reachability and placement checks |
+| [`DungeonSpawner.cs`](Assets/Scripts/Praktikum10/DungeonSpawner.cs) | Builds the prefabs, bakes the NavMesh, wires enemies to the scene, R, N and T keys |
+| [`DungeonHUD.cs`](Assets/Scripts/Praktikum10/DungeonHUD.cs) | uGUI debug panel, minimap, parameter and action buttons, goal banner |
+| [`DungeonDebugOverlay.cs`](Assets/Scripts/Praktikum10/DungeonDebugOverlay.cs) | Path lines, safe zone ring, Scene view Gizmos |
+| [`TopDownCamera.cs`](Assets/Scripts/Praktikum10/TopDownCamera.cs) | Follow camera and full map view |
+| [`Editor/Praktikum10SceneBuilder.cs`](Assets/Scripts/Praktikum10/Editor/Praktikum10SceneBuilder.cs) | Builds the scene and the floor, wall, prop, enemy, coin and safe point prefabs |
+| [`Editor/Praktikum10GeneratorTests.cs`](Assets/Scripts/Praktikum10/Editor/Praktikum10GeneratorTests.cs) | The seven-configuration test run |
 
-### Reused from earlier labs
+Earlier labs are reused rather than rewritten:
 
-- Enemy brain: `EnemyFSM`, `EnemyPerception`, `Health`, `EnemyVisualFeedback` from lab 5, with a new `EnemyFSM.SetRoute` for spawned enemies.
-- Gameplay: `Collectible`, `ExitGate`, `P9GameGoal` from lab 9, with a new optional `requiredItemType`, and the key and potion prefabs.
-- Player: `PlayerController`, with a new `allowFlight` switch. Flight is off here, so the player cannot cross walls.
+- **Lab 5:** `EnemyFSM`, `EnemyPerception`, `Health`, `SafePoint`, `EnemyVisualFeedback`, and the animator at `Assets/Scenes/Praktikum5/EnemyAnimation.controller`. `EnemyFSM` gained `SetRoute`, for enemies created at runtime.
+- **Lab 6:** `WorldHealthBar`.
+- **Lab 9:** `Collectible`, `ExitGate`, `P9GameGoal`, `HudPressButton`, and the key, potion and coin prefabs. `P9GameGoal` gained `requiredItemType`, so one item can open the exit. The coin model was wider than a cell, so this lab saves a smaller variant.
+- **Player:** `PlayerController` gained `allowFlight`, which this scene turns off.
 
-### Tests
+Build the lab 9 scene once first if its prefabs are missing, because the lab 10 builder needs them for the items.
 
-**Praktikum 10 → Run Generator Tests** generates 200 seeds for each of 7 configurations. It checks that results are repeatable and valid, that layouts vary, that the placement rules hold, and that cut corridors get repaired.
+---
 
 ## Lab 9: Procedural content generation, the smart spawner
 
